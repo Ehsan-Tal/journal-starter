@@ -10,9 +10,11 @@ Settings are loaded by ``api.config.Settings``.
 """
 
 import json
+
 from openai import AsyncOpenAI
-from api.models.entry import AnalysisResponse
+
 from api.config import get_settings
+from api.models.entry import AnalysisResponse
 
 
 def _default_client() -> AsyncOpenAI:
@@ -77,35 +79,34 @@ async def analyze_journal_entry(
     """,
         input=entry_text,
         text={
-        "format": {
-            "type": "json_schema",
-            "name": "entry_analysis",
-            "strict": True,
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "sentiment": {
-                        "type": "string",
-                        "enum": ["positive", "negative", "neutral"]
+            "format": {
+                "type": "json_schema",
+                "name": "entry_analysis",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "sentiment": {
+                            "type": "string",
+                            "enum": ["positive", "negative", "neutral"],
+                        },
+                        "summary": {"type": "string"},
+                        "topics": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 2,
+                            "maxItems": 4,
+                        },
                     },
-                    "summary": {
-                        "type": "string"
-                    },
-                    "topics": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "minItems": 2,
-                        "maxItems": 4
-                    }
+                    "required": ["sentiment", "summary", "topics"],
+                    "additionalProperties": False,
                 },
-                "required": ["sentiment", "summary", "topics"],
-                "additionalProperties": False
             }
-        }}
+        },
     )
-    result = AnalysisResponse.model_validate({
-        **json.loads(response.output_text), "entry_id": entry_id
-    })
+    result = AnalysisResponse.model_validate(
+        {**json.loads(response.output_text), "entry_id": entry_id}
+    )
     return {
         "entry_id": entry_id,
         "sentiment": result.sentiment,
