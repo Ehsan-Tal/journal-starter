@@ -10,9 +10,11 @@ Settings are loaded by ``api.config.Settings``.
 """
 
 import json
+
 from openai import AsyncOpenAI
-from api.models.entry import AnalysisResponse
+
 from api.config import get_settings
+from api.models.entry import AnalysisResponse
 
 
 def _default_client() -> AsyncOpenAI:
