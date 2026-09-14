@@ -1,13 +1,13 @@
 from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 
 from api.config import Settings, get_settings
 from api.models.entry import AnalysisResponse, Entry, EntryCreate, EntryUpdate
 from api.repositories.postgres_repository import PostgresDB
 from api.services.entry_service import EntryService
 from api.services.llm_service import analyze_journal_entry
-from fastapi.responses import RedirectResponse
 
 router = APIRouter()
 
@@ -23,9 +23,11 @@ async def get_entry_service(
 def root():
     return RedirectResponse(url="/entries")
 
+
 @router.get("/health", status_code=200)
 def health():
     return {"status": "ok"}
+
 
 @router.post("/entries", status_code=201)
 async def create_entry(
