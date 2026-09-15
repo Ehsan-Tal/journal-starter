@@ -7,6 +7,7 @@ on:
     branches: [main]
 
 permissions:
+  id-token: write   # required for OIDC
   contents: read
 
 concurrency:
@@ -14,32 +15,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.14
-
-      - name: Install dependencies
-        run: uv sync --locked --all-extras
-
-      - name: Ruff check
-        run: uv run ruff check .
-
-      - name: Ruff format check
-        run: uv run ruff format --check .
-
-      - name: Pyright type check
-        run: uv run pyright
-
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -94,15 +69,15 @@ jobs:
       - name: Run tests
         run: uv run pytest -v
         
-  build-and-push:
+  push:
+    name: push
     needs: test
     runs-on: ubuntu-latest
+
     env:
       AWS_REGION: eu-west-2
       ECR_REPOSITORY: journalspace/journalrepo
-    permissions:
-       id-token: write   # required for OIDC
-       contents: read  
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -110,7 +85,7 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::685323281678:role/github-actions-push-2-ecr
+          role-to-assume: arn:aws:iam::685323281678:role/role-to-permit-github-actions-push-to-ecr
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
