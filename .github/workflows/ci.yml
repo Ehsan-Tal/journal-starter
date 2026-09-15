@@ -76,7 +76,7 @@ jobs:
 
     env:
       AWS_REGION: eu-west-2
-      ECR_REPOSITORY: journalspace/journalrepo
+      ECR_REPOSITORY: journalrepo
 
     steps:
       - name: Checkout
