@@ -146,7 +146,7 @@ jobs:
 
     environment:
       name: production
-      url: https://www.ehsan-mujahid.co.uk
+      url: https://ehsan-mujahid.co.uk
 
     # One deploy at a time; a newer push waits instead of cancelling a rollout
     concurrency:
