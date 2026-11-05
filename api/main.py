@@ -1,9 +1,6 @@
 import logging
 
 from fastapi import FastAPI
-
-from api.routers.journal_router import router as journal_router
-
 from opentelemetry import metrics, trace
 from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
@@ -16,6 +13,8 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+from api.routers.journal_router import router as journal_router
 
 
 def setup_telemetry(service_name: str = "journal_api"):

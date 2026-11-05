@@ -1,20 +1,17 @@
+import logging
+import time
 from collections.abc import AsyncGenerator
-import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
+from opentelemetry import metrics, trace
+from opentelemetry.trace import Status, StatusCode
 
 from api.config import Settings, get_settings
 from api.models.entry import AnalysisResponse, Entry, EntryCreate, EntryUpdate
 from api.repositories.postgres_repository import PostgresDB
 from api.services.entry_service import EntryService
 from api.services.llm_service import analyze_journal_entry
-
-import logging
-import time
-
-from opentelemetry import trace, metrics
-from opentelemetry.trace import Status, StatusCode
 
 router = APIRouter()
 
@@ -37,10 +34,10 @@ async def get_entry_service(
 
 @router.get("/version")
 def version():
-    return {"commit": get_settings().git_commit} 
+    return {"commit": get_settings().git_commit}
 # returns build time variable.
-# case insensitive too! 
-# should work as long as the dockerfile error isn't a real error. 
+# case insensitive too!
+# should work as long as the dockerfile error isn't a real error.
 # it worked before, but it's worrying nonetheless
 # but- alright, now we have an "excuse" to start a new build/deployment.
 # plus, this part is done
