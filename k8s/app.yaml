@@ -97,6 +97,10 @@ apiVersion: v1
 kind: Service
 metadata:
   name: app
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:eu-west-2:685323281678:certificate/d3837220-38db-45fe-8792-5815dc7572bd
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "443"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: http
 spec:
   # Public entry point. On EKS, with no AWS Load Balancer Controller installed, this makes
   # Kubernetes create a Classic Load Balancer with a public DNS name (it bills credits hourly).
@@ -108,5 +112,9 @@ spec:
   selector:
     app: app
   ports:
-    - port: 80
+    - name: http
+      port: 80
+      targetPort: 8000
+    - name: https
+      port: 443
       targetPort: 8000
