@@ -65,7 +65,7 @@ async def create_entry(
     # Store the entry in the database
     created_entry = await entry_service.create_entry(entry.model_dump())
 
-    entry_counter.add(1, {"entry.kind": entry_data.work})
+    entry_counter.add(1)
 
     # Return success response (FastAPI handles datetime serialization automatically)
     return {"detail": "Entry created successfully", "entry": created_entry}
@@ -110,14 +110,14 @@ async def get_entry(entry_id: str, entry_service: EntryService = Depends(get_ent
             entry = await entry_service.get_entry(entry_id)
             if entry is None:
                 raise HTTPException(status_code=404, detail="Entry not found")
-            entry_counter.add(1, {"entry.id": entry_id})
+            entry_counter.add(1)
         except Exception as exc:
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR))
             logger.exception("Entry %s failed", entry_id)
             raise
         finally:
-            entry_duration.record(time.perf_counter() - start, {"entry.id": entry_id})
+            entry_duration.record((time.perf_counter() - start) * 1000)
 
     return entry
 

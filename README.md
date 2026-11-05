@@ -300,6 +300,16 @@ job uses a disposable Postgres service container, and Task 4 is exercised
 with an injected mock OpenAI client so CI never calls a real LLM. Task 4's
 required live verification is run locally instead.
 
+## EKS Observability
+
+The EKS deployment exports OpenTelemetry logs, metrics, and traces over OTLP/HTTP.
+`k8s/app.yaml` sets `OTEL_EXPORTER_OTLP_ENDPOINT` to the CloudWatch agent service
+at `http://cloudwatch-agent.amazon-cloudwatch.svc.cluster.local:4318`; the
+exporters append the standard signal paths (`/v1/logs`, `/v1/metrics`, and
+`/v1/traces`). FastAPI request instrumentation provides request telemetry, and
+the API also records journal operation metrics. The CloudWatch agent must have
+its OTLP/HTTP receiver enabled and be reachable from the app's namespace.
+
 ## 🎯 Development Tasks
 
 Complete every acceptance check listed for a task. Automated tests must pass,
