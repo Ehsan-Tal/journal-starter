@@ -1,0 +1,12 @@
+.venv
+__pycache__
+.git
+.github
+.vscode
+.devcontainer
+.pytest_cache
+.ruff_cache
+# keep real secrets out of the image (COPY . . would otherwise include them)
+.env
+.env.*
+!.env.example
