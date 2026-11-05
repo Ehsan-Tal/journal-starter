@@ -104,6 +104,14 @@ jobs:
         if: env.PUBLISH != 'true'
         run: docker build --build-arg GIT_COMMIT="$GITHUB_SHA" -t "$ECR_REPOSITORY:pr-check" .
 
+      - name: Check required variables
+        if: env.PUBLISH == 'true'
+        env:
+          PUSH_ROLE: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+        run: |
+          : "${PUSH_ROLE:?AWS_ECR_PUSH_ROLE_ARN is empty. Add it as a REPOSITORY variable (Settings, Secrets and variables, Actions, Variables tab). The build job does not see environment variables.}"
+          : "${ECR_REPOSITORY:?ECR_REPOSITORY is empty. Add it as a REPOSITORY variable.}"
+
       - name: Configure AWS credentials via OIDC
         if: env.PUBLISH == 'true'
         uses: aws-actions/configure-aws-credentials@v4
@@ -138,7 +146,7 @@ jobs:
 
     environment:
       name: production
-      url: https://REPLACE-ME.example.com   # TODO: set your public URL
+      url: https://www.ehsan-mujahid.co.uk
 
     # One deploy at a time; a newer push waits instead of cancelling a rollout
     concurrency:
@@ -148,6 +156,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Check required variables
+        env:
+          DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          : "${DEPLOY_ROLE:?AWS_DEPLOY_ROLE_ARN is empty. Add it as a repository variable or as a variable on the production environment.}"
+          : "${EKS_CLUSTER_NAME:?EKS_CLUSTER_NAME is empty. Add it as a repository variable or as a variable on the production environment.}"
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
