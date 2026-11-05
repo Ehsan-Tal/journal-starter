@@ -1,0 +1,106 @@
+# Applied by the deploy job. IMAGE_PLACEHOLDER is replaced with the ECR image
+# that the build job just pushed (tagged with the commit SHA).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app   # must match var.app_service_account (EKS Pod Identity link in Terraform)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels:
+    app: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      serviceAccountName: app
+      containers:
+        - name: app
+          image: IMAGE_PLACEHOLDER
+          ports:
+            - containerPort: 8000   # ASSUMPTION: change to the port your API listens on
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials   # created by scripts/load_schema.sh
+                  key: database_url
+            # Same values as the CI service container's POSTGRES_* variables, in case the
+            # app reads them individually instead of DATABASE_URL.
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: dbname
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets      # created by the deploy job
+                  key: OPENAI_API_KEY
+            - name: OPENAI_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: OPENAI_BASE_URL
+            - name: OPENAI_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: OPENAI_MODEL
+          # A pod only counts as ready once /version answers, so the rollout
+          # only succeeds when the new code is actually serving requests.
+          readinessProbe:
+            httpGet:
+              path: /version
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          # Restarts the container if the server stops answering (e.g. hung process).
+          livenessProbe:
+            httpGet:
+              path: /version
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 384Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+spec:
+  type: ClusterIP   # not public; exposing it (Ingress / LoadBalancer) is a separate, credit-consuming step
+  selector:
+    app: app
+  ports:
+    - port: 80
+      targetPort: 8000

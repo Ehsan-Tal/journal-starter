@@ -3,6 +3,7 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# we need this to get
 
 class Settings(BaseSettings):
     """Typed application settings.
@@ -37,6 +38,11 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+    )
+
+    git_commit: str = Field(
+        default="unknown",
+        description="Git commit hash of the current build, set at image build time.",
     )
 
 

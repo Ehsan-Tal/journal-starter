@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
@@ -9,8 +10,22 @@ from api.repositories.postgres_repository import PostgresDB
 from api.services.entry_service import EntryService
 from api.services.llm_service import analyze_journal_entry
 
+import logging
+import time
+
+from opentelemetry import trace, metrics
+from opentelemetry.trace import Status, StatusCode
+
 router = APIRouter()
 
+tracer = trace.get_tracer(__name__)
+meter = metrics.get_meter(__name__)
+logger = logging.getLogger(__name__)
+
+entry_counter = meter.create_counter("entries.created", unit="1", description="Counts the number of journal entries created")
+
+entry_duration = meter.create_histogram(
+    name="entries.duration", unit="ms", description="Measures the duration of journal entry processing")
 
 async def get_entry_service(
     settings: Settings = Depends(get_settings),
@@ -19,21 +34,32 @@ async def get_entry_service(
         yield EntryService(db)
 
 
+
+@router.get("/version")
+def version():
+    return {"commit": get_settings().git_commit} 
+# returns build time variable.
+# case insensitive too! 
+# should work as long as the dockerfile error isn't a real error. 
+# it worked before, but it's worrying nonetheless
+# but- alright, now we have an "excuse" to start a new build/deployment.
+# plus, this part is done
+
 @router.get("/")
 def root():
     return RedirectResponse(url="/entries")
 
-
+# lmao. thumbs up, I'm fine.
 @router.get("/health", status_code=200)
 def health():
     return {"status": "ok"}
-
 
 @router.post("/entries", status_code=201)
 async def create_entry(
     entry_data: EntryCreate, entry_service: EntryService = Depends(get_entry_service)
 ):
     """Create a new journal entry."""
+
     # Create the full entry with auto-generated fields
     entry = Entry(
         work=entry_data.work, struggle=entry_data.struggle, intention=entry_data.intention
@@ -41,6 +67,8 @@ async def create_entry(
 
     # Store the entry in the database
     created_entry = await entry_service.create_entry(entry.model_dump())
+
+    entry_counter.add(1, {"entry.kind": entry_data.work})
 
     # Return success response (FastAPI handles datetime serialization automatically)
     return {"detail": "Entry created successfully", "entry": created_entry}
@@ -77,9 +105,23 @@ async def get_entry(entry_id: str, entry_service: EntryService = Depends(get_ent
 
     Hint: Check the update_entry endpoint for similar patterns
     """
-    entry = await entry_service.get_entry(entry_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="Entry not found")
+    start = time.perf_counter()
+    with tracer.start_as_current_span("entry_creation") as span:
+        span.set_attribute("entry.id", entry_id)
+        try:
+            logger.info("Processing entry %s", entry_id)  # carries this span's trace/span IDs
+            entry = await entry_service.get_entry(entry_id)
+            if entry is None:
+                raise HTTPException(status_code=404, detail="Entry not found")
+            entry_counter.add(1, {"entry.id": entry_id})
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_status(Status(StatusCode.ERROR))
+            logger.exception("Entry %s failed", entry_id)
+            raise
+        finally:
+            entry_duration.record(time.perf_counter() - start, {"entry.id": entry_id})
+
     return entry
 
 

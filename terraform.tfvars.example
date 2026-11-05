@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (gitignored) and edit. Nothing secret belongs here.
+project           = "demo"
+aws_profile       = null            # or "my-sso-profile"
+api_allowed_cidrs = ["203.0.113.7/32"] # your public IP
+
+# Match the app / CI workflow
+db_username   = "postgres"
+github_repo   = "OWNER/REPO"

@@ -10,9 +10,21 @@ permissions:
   id-token: write   # required for OIDC
   contents: read
 
+# Cancel superseded PR runs, but never cancel a run on main: that could
+# interrupt a deploy halfway through a rollout.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Values come from Terraform. Set them once as repository *variables*
+# (Settings > Secrets and variables > Actions > Variables); see the
+# `gh variable set` commands in the instructions. None of these are secrets.
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-2' }}       # terraform output region
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}              # var.ecr_repo_name, e.g. journalspace/journalrepo
+  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}          # terraform output cluster_name ("<project>-eks")
+  K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE || 'default' }}   # var.app_namespace
+  K8S_DEPLOYMENT: app                                     # metadata.name in k8s/app.yaml
 
 jobs:
   test:
@@ -60,6 +72,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras
 
+      - name: Lint Code
+        run: uv run ruff check .
+
       - name: Initialize database schema
         run: |
           PGPASSWORD=postgres psql \
@@ -68,15 +83,67 @@ jobs:
 
       - name: Run tests
         run: uv run pytest -v
-        
-  push:
-    name: push
+
+  build:
+    name: build
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.push.outputs.image }}
 
     env:
-      AWS_REGION: eu-west-2
-      ECR_REPOSITORY: journalspace/journalrepo
+      # Only pushes to main publish an image. Pull requests just prove the
+      # Dockerfile builds (no AWS access needed, none granted by the push role).
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image (pull request: verify only)
+        if: env.PUBLISH != 'true'
+        run: docker build --build-arg GIT_COMMIT="$GITHUB_SHA" -t "$ECR_REPOSITORY:pr-check" .
+
+      - name: Configure AWS credentials via OIDC
+        if: env.PUBLISH == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # terraform output github_push_role_arn
+          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: env.PUBLISH == 'true'
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        if: env.PUBLISH == 'true'
+        id: push
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker build --build-arg GIT_COMMIT="$IMAGE_TAG" -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Deploy to EKS
+    needs: build
+    # Only deploy merged code, never pull requests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+      url: https://REPLACE-ME.example.com   # TODO: set your public URL
+
+    # One deploy at a time; a newer push waits instead of cancelling a rollout
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
 
     steps:
       - name: Checkout
@@ -85,17 +152,63 @@ jobs:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::685323281678:role/role-to-permit-github-actions-push-to-ecr
+          # terraform output github_deploy_role_arn
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Configure kubectl
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
 
-      - name: Build and push image
+      - name: Sync app secrets into the cluster
+        # The API key lives only in GitHub (an encrypted environment secret) and in the
+        # cluster. It is never in the repo, the image, or the logs (GitHub masks it).
         env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          : "${OPENAI_API_KEY:?Add the OPENAI_API_KEY secret to the production environment}"
+          : "${OPENAI_BASE_URL:?Add the OPENAI_BASE_URL repository variable}"
+          : "${OPENAI_MODEL:?Add the OPENAI_MODEL repository variable}"
+          kubectl -n "$K8S_NAMESPACE" create secret generic app-secrets \
+            --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY" \
+            --from-literal=OPENAI_BASE_URL="$OPENAI_BASE_URL" \
+            --from-literal=OPENAI_MODEL="$OPENAI_MODEL" \
+            --dry-run=client -o yaml | kubectl -n "$K8S_NAMESPACE" apply -f -
+
+      - name: Apply manifests with the new image
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+        run: |
+          echo "Deploying $IMAGE"
+          sed "s|IMAGE_PLACEHOLDER|${IMAGE}|g" k8s/app.yaml \
+            | kubectl -n "$K8S_NAMESPACE" apply -f -
+
+      - name: Wait for rollout
+        run: kubectl -n "$K8S_NAMESPACE" rollout status "deployment/$K8S_DEPLOYMENT" --timeout=300s
+
+      # Confirms the pods that are actually serving traffic run THIS commit.
+      # Failing here triggers the rollback step below.
+      - name: Verify deployed version
+        run: |
+          kubectl -n "$K8S_NAMESPACE" port-forward "deployment/$K8S_DEPLOYMENT" 8080:8000 >/dev/null &
+          PF=$!
+          trap 'kill $PF 2>/dev/null' EXIT
+          for i in $(seq 1 15); do
+            got=$(curl -fsS http://localhost:8080/version 2>/dev/null | jq -r .commit 2>/dev/null || true)
+            if [ "$got" = "$GITHUB_SHA" ]; then
+              echo "Version OK: $got"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Expected $GITHUB_SHA but /version returned '${got:-nothing}'"
+          exit 1
+
+      - name: Diagnostics and rollback on failure
+        if: failure()
+        run: |
+          kubectl -n "$K8S_NAMESPACE" get pods -l app="$K8S_DEPLOYMENT" -o wide || true
+          kubectl -n "$K8S_NAMESPACE" describe "deployment/$K8S_DEPLOYMENT" || true
+          kubectl -n "$K8S_NAMESPACE" logs -l app="$K8S_DEPLOYMENT" --tail=50 --all-containers || true
+          kubectl -n "$K8S_NAMESPACE" rollout undo "deployment/$K8S_DEPLOYMENT" || true

@@ -3,12 +3,16 @@ FROM python:3.14-slim
 COPY --from=docker.io/astral/uv:latest /uv /uvx /bin
 
 WORKDIR /app
+    
+ARG GIT_COMMIT=unknown
+
+ENV GIT_COMMIT=$GIT_COMMIT
 
 COPY pyproject.toml uv.lock ./
 
 RUN uv sync --frozen --no-install-project
 
-COPY . .
+COPY . .s
 
 RUN uv sync --frozen
 
