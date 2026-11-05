@@ -98,7 +98,13 @@ kind: Service
 metadata:
   name: app
 spec:
-  type: ClusterIP   # not public; exposing it (Ingress / LoadBalancer) is a separate, credit-consuming step
+  # Public entry point. On EKS, with no AWS Load Balancer Controller installed, this makes
+  # Kubernetes create a Classic Load Balancer with a public DNS name (it bills credits hourly).
+  type: LoadBalancer
+  # While testing, consider limiting who can reach it (your API key pays for every request).
+  # Uncomment and put your own public IP:
+  # loadBalancerSourceRanges:
+  #   - 203.0.113.7/32
   selector:
     app: app
   ports:
