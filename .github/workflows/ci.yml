@@ -146,7 +146,7 @@ jobs:
 
     environment:
       name: production
-      url: https://REPLACE-ME.example.com   # TODO: set your public URL
+      url: https://www.ehsan-mujahid.co.uk  # TODO: set your public URL
 
     # One deploy at a time; a newer push waits instead of cancelling a rollout
     concurrency:
